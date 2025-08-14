@@ -1,0 +1,33 @@
+{
+    "global_config": {
+        "max_iter": 1000,
+        "abs_tol": 1e-7,
+        "n_cpu": -2
+    },
+    "sessions": [
+        ["BFGS", 100, 2, "gauss5", "conv"],
+        ["BFGS", 100, 3, "gauss5", "conv"],
+        ["BFGS", 100, 4, "gauss5", "conv"],
+        ["BFGS", 100, 5, "gauss5", "conv"],
+        ["BFGS", 100, 2, "tri", "conv"],
+        ["BFGS", 100, 3, "tri", "conv"],
+        ["BFGS", 100, 4, "tri", "conv"],
+        ["BFGS", 100, 5, "tri", "conv"],
+        ["BFGS", 100, 2, "gauss5", "pow_3"],
+        ["BFGS", 100, 3, "gauss5", "pow_3"],
+        ["BFGS", 100, 4, "gauss5", "pow_3"],
+        ["BFGS", 100, 5, "gauss5", "pow_3"],
+        ["BFGS", 100, 2, "tri", "pow_3"],
+        ["BFGS", 100, 3, "tri", "pow_3"],
+        ["BFGS", 100, 4, "tri", "pow_3"],
+        ["BFGS", 100, 5, "tri", "pow_3"],
+        ["BFGS", 100, 2, "gauss5", "nonint"],
+        ["BFGS", 100, 3, "gauss5", "nonint"],
+        ["BFGS", 100, 4, "gauss5", "nonint"],
+        ["BFGS", 100, 5, "gauss5", "nonint"],
+        ["BFGS", 100, 2, "tri", "nonint"],
+        ["BFGS", 100, 3, "tri", "nonint"],
+        ["BFGS", 100, 4, "tri", "nonint"],
+        ["BFGS", 100, 5, "tri", "nonint"]
+    ]
+}

@@ -4,3 +4,4 @@ qulacs~=0.6.12
 google~=3.0.0
 scipy~=1.15.3
 tqdm~=4.67.1
+joblib~=1.5.1

@@ -1,9 +1,11 @@
 import json
 import os
+import random
 from dataclasses import dataclass
 from typing import Literal
 
 import joblib
+from tqdm import tqdm
 
 import repo
 from generate_random_seed import generate_random_seed
@@ -178,10 +180,14 @@ def main(config_json_path: str):
                     seed_theta_init=generate_random_seed(),
                 )
             )
+    random.shuffle(run_params)
 
     # run with joblib
     with joblib.Parallel(n_jobs=config.global_config.n_cpu_actual) as parallel:
-        parallel(joblib.delayed(run)(run_param) for run_param in run_params)
+        parallel(
+            joblib.delayed(run)(run_param)
+            for run_param in tqdm(run_params, desc="run")
+        )
 
 
 if __name__ == '__main__':

@@ -1,7 +1,10 @@
 import datetime
 import json
+import os
 import time
-from functools import lru_cache, reduce
+from contextlib import redirect_stdout
+from functools import lru_cache, reduce, wraps
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -17,6 +20,23 @@ from util import X_mat, Y_mat, Z_mat, fullgate, ham_to_gate_mat, \
     gate_mat_to_gate, ham_to_gate, make_fullgate, CacheSession
 
 
+def wrapper_process(runner: Callable[[RunParam], None]) -> Callable[[RunParam], None]:
+    # g.redirect_output_to_log_file is True なら stdout をファイルにリダイレクトする
+    @wraps(runner)
+    def wrapper(g: RunParam) -> None:
+        if g.redirect_output_to_log_file:
+            os.makedirs("./log", exist_ok=True)
+            log_file_path = f'./log/output_{abs(hash(g))}.log'
+            print("Redirect stdout of", g, "to", log_file_path)
+            with open(log_file_path, 'w') as f, redirect_stdout(f):
+                return runner(g)
+        else:
+            return runner(g)
+
+    return wrapper
+
+
+@wrapper_process
 def run(g: RunParam) -> None:
     # nqubit = 4  # @param {type: "integer"}
     # c_depth = 3  # @param {type: "integer"}

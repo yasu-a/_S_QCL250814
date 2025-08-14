@@ -21,7 +21,8 @@ class RunParam:
     time_step: float = 0.77
     obs_coeff: float = 2.0
     seed_train: int = 0
-    show_progress_bar: bool = False  # 進捗バーを表示するかどうか
+    show_progress_bar: bool = True  # 進捗バーを表示するかどうか
+    redirect_output_to_log_file: bool = False
 
     def __post_init__(self) -> None:
         """パラメータのタイプチェッキングとバリデーション"""
@@ -54,6 +55,8 @@ class RunParam:
             f"seed_theta_init must be int, got {type(self.seed_theta_init)}"
         assert isinstance(self.show_progress_bar, bool), \
             f"show_progress_bar must be bool, got {type(self.show_progress_bar)}"
+        assert isinstance(self.redirect_output_to_log_file, bool), \
+            f"redirect_output_to_log_file must be bool, got {type(self.redirect_output_to_log_file)}"
 
         # 値の範囲チェック
         assert self.nqubit > 0, \

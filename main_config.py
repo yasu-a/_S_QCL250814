@@ -178,6 +178,8 @@ def main(config_json_path: str):
                     seed_system=generate_random_seed(),
                     seed_time_evol=generate_random_seed(),
                     seed_theta_init=generate_random_seed(),
+                    show_progress_bar=False,
+                    redirect_output_to_log_file=True,
                 )
             )
     random.shuffle(run_params)
@@ -186,7 +188,7 @@ def main(config_json_path: str):
     with joblib.Parallel(n_jobs=config.global_config.n_cpu_actual) as parallel:
         parallel(
             joblib.delayed(run)(run_param)
-            for run_param in tqdm(run_params, desc="run")
+            for run_param in tqdm(run_params, desc="run", mininterval=10)
         )
 
 

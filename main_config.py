@@ -161,6 +161,7 @@ def main(config_json_path: str):
                 f"Warning: {session.to_record_key()} has {n_run_current} records, but {n_run_required} are required")
             n_run_required = n_run_current
         n_rest = n_run_required - n_run_current
+        print(" -", session, n_rest)
 
         # generate run params
         for _ in range(n_rest):

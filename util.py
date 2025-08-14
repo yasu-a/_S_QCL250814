@@ -35,130 +35,129 @@ def make_fullgate(list_SiteAndOperator, nqubit):
     return reduce(np.kron, list_SingleGates)
 
 
-def returns_readonly_array(f: Callable[[Any], np.ndarray]):
-    """ NumPy配列を返す関数の出力を読み取り専用にするデコレータ
+class CacheSession:
+    def __init__(self):
+        self._cached_func_registry = []
 
-    このデコレータを適用すると、関数が返すNumPy配列の書き込みフラグがFalseに設定され、
-    意図しない変更を防ぐ
+    @classmethod
+    def returns_readonly_array(cls, f: Callable[[Any], np.ndarray]):
+        """ NumPy配列を返す関数の出力を読み取り専用にするデコレータ
 
-    Args:
-        f: NumPy配列を返す関数。
+        このデコレータを適用すると、関数が返すNumPy配列の書き込みフラグがFalseに設定され、
+        意図しない変更を防ぐ
 
-    Returns:
-        ラップされた関数。この関数は読み取り専用のNumPy配列を返します。
-    """
+        Args:
+            f: NumPy配列を返す関数。
 
-    @wraps(f)
-    def wrapper(*args, **kwargs) -> np.ndarray:
-        result = f(*args, **kwargs)
-        result.setflags(write=False)
-        return result
+        Returns:
+            ラップされた関数。この関数は読み取り専用のNumPy配列を返します。
+        """
 
-    return wrapper
-
-
-_cached_func_registry = []
-
-
-def _register_for_cache_profile(cached_func):
-    """
-    キャッシュプロファイリングのためにキャッシュされた関数を内部レジストリに登録します。
-
-    この関数は `attach_cache` デコレータ内で使用され、キャッシュされた関数の情報を追跡します。
-    ユーザーが直接呼び出すことは想定されていません。
-
-    Args:
-        cached_func: キャッシュされた関数オブジェクト。
-    """
-
-    _cached_func_registry.append(cached_func)
-
-
-def print_cache_profile() -> None:
-    """
-    登録されたキャッシュされた関数のプロファイル情報を表示します。
-
-    この関数は、キャッシュのヒット数、ミス数、最大サイズ、現在のサイズなどの統計情報を
-    pandas DataFrame形式で出力します。これにより、キャッシュの利用状況を把握し、
-    パフォーマンスチューニングに役立てることができます。
-    """
-
-    print("=" * 40, "CACHE PROFILE", "=" * 40)
-    data = []
-    for cached_func in _cached_func_registry:
-        data.append({
-            "name": cached_func.__name__,
-            "hits": cached_func.cache_info().hits,
-            "misses": cached_func.cache_info().misses,
-            "maxsize": cached_func.cache_info().maxsize,
-            "currsize": cached_func.cache_info().currsize,
-        })
-    with pd.option_context(
-            'display.max_rows', 999, 'display.max_columns', 999, 'display.width', 999
-    ):
-        print(pd.DataFrame(data))
-    print("=" * (40 + 1 + len("CACHE PROFILE") + 1 + 40))
-
-
-def attach_cache(cache_decorator):
-    """
-    指定されたキャッシュデコレータを適用し、キャッシュプロファイリングのために登録するデコレータを返します。
-
-    このデコレータは、関数をキャッシュするだけでなく、その関数のキャッシュ情報を追跡し、
-    `print_cache_profile` 関数で表示できるようにします。また、NumPy配列をハッシュ可能にするための
-    変換と、出力配列を読み取り専用にする処理も内部的に行います。
-
-    Args:
-        cache_decorator: キャッシュを行うデコレータ（例: `functools.lru_cache`）。
-
-    Returns:
-        関数をラップするデコレータ。このデコレータを適用すると、関数はキャッシュされ、
-        そのキャッシュ情報がプロファイリングの対象となり、NumPy配列の引数はハッシュ可能に変換され、
-        返り値のNumPy配列は読み取り専用になります。
-    """
-
-    def array_to_hashable(f):
-        # tuple（hashableなNumpy配列）を受け取る関数をNumpy配列を受け取る関数に変換するデコレータ
         @wraps(f)
-        def wrapper(*args, **kwargs):
-            new_args = []
-            for arg in args:
-                if isinstance(arg, np.ndarray):
-                    new_args.append(tuple(map(float, arg)))
-                elif isinstance(arg, tuple):
-                    assert False
-                else:
-                    new_args.append(arg)
-            return f(*new_args, **kwargs)
+        def wrapper(*args, **kwargs) -> np.ndarray:
+            result = f(*args, **kwargs)
+            result.setflags(write=False)
+            return result
 
         return wrapper
 
-    def hashable_to_array(f):
-        # Numpy配列を受け取る関数をtuple（hashableなNumpy配列）を受け取る関数に変換する
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            new_args = []
-            for arg in args:
-                if isinstance(arg, tuple):
-                    new_args.append(np.array(arg))
-                elif isinstance(arg, np.ndarray):
-                    assert False
-                else:
-                    new_args.append(arg)
-            return f(*new_args, **kwargs)
+    def _register_for_cache_profile(self, cached_func):
+        """
+        キャッシュプロファイリングのためにキャッシュされた関数を内部レジストリに登録します。
 
-        return wrapper
+        この関数は `attach_cache` デコレータ内で使用され、キャッシュされた関数の情報を追跡します。
+        ユーザーが直接呼び出すことは想定されていません。
 
-    def decorator(f):
-        f = hashable_to_array(f)
-        f = cached_func = cache_decorator(f)
-        _register_for_cache_profile(cached_func)
-        f = array_to_hashable(f)
-        f = returns_readonly_array(f)
-        setattr(f, "cache_info", cached_func.cache_info)
-        return f
+        Args:
+            cached_func: キャッシュされた関数オブジェクト。
+        """
 
-    return decorator
+        self._cached_func_registry.append(cached_func)
+
+    def print_cache_profile(self) -> None:
+        """
+        登録されたキャッシュされた関数のプロファイル情報を表示します。
+
+        この関数は、キャッシュのヒット数、ミス数、最大サイズ、現在のサイズなどの統計情報を
+        pandas DataFrame形式で出力します。これにより、キャッシュの利用状況を把握し、
+        パフォーマンスチューニングに役立てることができます。
+        """
+
+        print("=" * 40, "CACHE PROFILE", "=" * 40)
+        data = []
+        for cached_func in self._cached_func_registry:
+            data.append({
+                "name": cached_func.__name__,
+                "hits": cached_func.cache_info().hits,
+                "misses": cached_func.cache_info().misses,
+                "maxsize": cached_func.cache_info().maxsize,
+                "currsize": cached_func.cache_info().currsize,
+            })
+        with pd.option_context(
+                'display.max_rows', 999, 'display.max_columns', 999, 'display.width', 999
+        ):
+            print(pd.DataFrame(data))
+        print("=" * (40 + 1 + len("CACHE PROFILE") + 1 + 40))
+
+    def attach_cache(self, cache_decorator):
+        """
+        指定されたキャッシュデコレータを適用し、キャッシュプロファイリングのために登録するデコレータを返します。
+
+        このデコレータは、関数をキャッシュするだけでなく、その関数のキャッシュ情報を追跡し、
+        `print_cache_profile` 関数で表示できるようにします。また、NumPy配列をハッシュ可能にするための
+        変換と、出力配列を読み取り専用にする処理も内部的に行います。
+
+        Args:
+            cache_decorator: キャッシュを行うデコレータ（例: `functools.lru_cache`）。
+
+        Returns:
+            関数をラップするデコレータ。このデコレータを適用すると、関数はキャッシュされ、
+            そのキャッシュ情報がプロファイリングの対象となり、NumPy配列の引数はハッシュ可能に変換され、
+            返り値のNumPy配列は読み取り専用になります。
+        """
+
+        def array_to_hashable(f):
+            # tuple（hashableなNumpy配列）を受け取る関数をNumpy配列を受け取る関数に変換するデコレータ
+            @wraps(f)
+            def wrapper(*args, **kwargs):
+                new_args = []
+                for arg in args:
+                    if isinstance(arg, np.ndarray):
+                        new_args.append(tuple(map(float, arg)))
+                    elif isinstance(arg, tuple):
+                        assert False
+                    else:
+                        new_args.append(arg)
+                return f(*new_args, **kwargs)
+
+            return wrapper
+
+        def hashable_to_array(f):
+            # Numpy配列を受け取る関数をtuple（hashableなNumpy配列）を受け取る関数に変換する
+            @wraps(f)
+            def wrapper(*args, **kwargs):
+                new_args = []
+                for arg in args:
+                    if isinstance(arg, tuple):
+                        new_args.append(np.array(arg))
+                    elif isinstance(arg, np.ndarray):
+                        assert False
+                    else:
+                        new_args.append(arg)
+                return f(*new_args, **kwargs)
+
+            return wrapper
+
+        def decorator(f):
+            f = hashable_to_array(f)
+            f = cached_func = cache_decorator(f)
+            self._register_for_cache_profile(cached_func)
+            f = array_to_hashable(f)
+            f = self.returns_readonly_array(f)
+            setattr(f, "cache_info", cached_func.cache_info)
+            return f
+
+        return decorator
 
 
 class FullGateBuilder:

@@ -13,14 +13,16 @@ from tqdm import tqdm
 from repo import put_record
 from run_param import RunParam
 from run_record import IterationRecord, GlobalRecord
-from util import X_mat, Y_mat, Z_mat, print_cache_profile, attach_cache, fullgate, ham_to_gate_mat, \
-    gate_mat_to_gate, ham_to_gate, make_fullgate
+from util import X_mat, Y_mat, Z_mat, fullgate, ham_to_gate_mat, \
+    gate_mat_to_gate, ham_to_gate, make_fullgate, CacheSession
 
 
 def run(g: RunParam) -> None:
     # nqubit = 4  # @param {type: "integer"}
     # c_depth = 3  # @param {type: "integer"}
     # time_step = 0.77  # @param {type: "number"}
+
+    cache_session = CacheSession()
 
     if g.func_type == "gauss10":
         def func_to_learn(x):
@@ -57,7 +59,7 @@ def run(g: RunParam) -> None:
 
     if g.method == "conv":
         # 確認済み
-        @attach_cache(lru_cache(maxsize=1024))
+        @cache_session.attach_cache(lru_cache(maxsize=1024))
         def U_in_mat(x: float) -> np.ndarray:
             ham = np.eye(2 ** g.nqubit, dtype=complex)
             for i in reversed(range(g.nqubit)):
@@ -76,7 +78,7 @@ def run(g: RunParam) -> None:
 
     elif g.method == "pow_3":
         # 確認済み
-        @attach_cache(lru_cache(maxsize=1024))
+        @cache_session.attach_cache(lru_cache(maxsize=1024))
         def U_in_mat(x: float) -> np.ndarray:
             ham = np.eye(2 ** g.nqubit, dtype=complex)
             for i in reversed(range(g.nqubit)):
@@ -116,7 +118,7 @@ def run(g: RunParam) -> None:
         # print(Jmat)
         # print()
 
-        @attach_cache(lru_cache(maxsize=1024))
+        @cache_session.attach_cache(lru_cache(maxsize=1024))
         def U_in_mat(x: float) -> np.ndarray:
             dataham = np.zeros((2 ** g.nqubit, 2 ** g.nqubit), dtype=complex)
 
@@ -171,7 +173,7 @@ def run(g: RunParam) -> None:
     with np.printoptions(suppress=True, precision=3, linewidth=999):
         print(time_evol_gate.get_matrix())
 
-    @attach_cache(lru_cache(maxsize=1024))
+    @cache_session.attach_cache(lru_cache(maxsize=1024))
     def U_out_mat(theta) -> np.ndarray:
         theta = theta.reshape(g.c_depth, g.nqubit, 3)[:, ::-1,
                 :].flatten()  # qulacs.ParametricQuantumCircuitはnqubitに渡って逆順にパラメータを渡しているので整合性をとる
@@ -290,7 +292,10 @@ def run(g: RunParam) -> None:
     n_iter = 0  # callbackで使うイテレーション回数のカウンタ
     time_start = time.monotonic()  # 開始時刻
     time_info = time.monotonic()  # 最後に最適化の状態を表示した時刻
-    pbar = tqdm(total=g.max_iter)  # プログレスバー
+    if g.show_progress_bar:
+        pbar = tqdm(total=g.max_iter)  # プログレスバー
+    else:
+        pbar = None
 
     # 最適化の履歴を記録するリスト
     cost_history = []
@@ -320,8 +325,9 @@ def run(g: RunParam) -> None:
         })
 
         # プログレスバーの更新
-        pbar.update()
-        pbar.set_description(f"Iteration #{n_iter}, {cost_init=:.7f}, {current_cost=:.7f}")
+        if pbar is not None:
+            pbar.update()
+            pbar.set_description(f"Iteration #{n_iter}, {cost_init=:.7f}, {current_cost=:.7f}")
 
         # 現在の状況の表示
         if time_now - time_info >= 30:  # 30秒に1回だけ状況を表示
@@ -331,7 +337,7 @@ def run(g: RunParam) -> None:
                     f"Iteration #{n_iter}({datetime.timedelta(seconds=elapsed_time)}), {cost_init=:.7f}, {current_cost=:.7f}")
                 print(f"Current theta:")
                 print(np.array2string(theta, separator=", ", max_line_width=150))
-            print_cache_profile()
+            cache_session.print_cache_profile()
             print()
 
     if g.opt_method == "Nelder-Mead":

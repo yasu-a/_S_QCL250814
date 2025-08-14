@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -130,3 +131,7 @@ class GlobalRecord:
 
             iteration_records=[IterationRecord.from_json(x) for x in body["iteration_records"]],
         )
+
+    @property
+    def opt_maxiter(self):
+        return int(re.search(r"\bmaxiter=(\d+)\b", self.opt_options).group(1))

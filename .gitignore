@@ -1,2 +1,5 @@
 # Project exclude paths
 /src/
+/log/
+/out/
+/sato_tougou/

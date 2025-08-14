@@ -1,7 +1,8 @@
 import json
 import os
 from dataclasses import dataclass
-from typing import Literal, Callable
+from pathlib import Path
+from typing import Literal, Callable, Iterable
 
 from run_record import GlobalRecord
 
@@ -61,3 +62,7 @@ def put_record(record: GlobalRecord):
     with open(filepath, "w") as f:
         json.dump(record.to_json(), f, indent=2, ensure_ascii=True)
     print(f"Result saved as '{filepath!s}'")
+
+
+def iter_json_path() -> Iterable[str]:
+    yield from map(str, Path(BASE_DIR_PATH).rglob("*.json"))

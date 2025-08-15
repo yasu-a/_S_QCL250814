@@ -28,6 +28,6 @@
         ["BFGS", 200, 2, "tri", "nonint"],
         ["BFGS", 200, 3, "tri", "nonint"],
         ["BFGS", 200, 4, "tri", "nonint"],
-        ["BFGS", 200, 5, "tri", "nonint"],
+        ["BFGS", 200, 5, "tri", "nonint"]
     ]
 }

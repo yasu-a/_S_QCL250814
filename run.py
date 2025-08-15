@@ -4,6 +4,7 @@ import os
 import time
 from contextlib import redirect_stdout
 from functools import lru_cache, reduce, wraps
+from pprint import pprint
 from typing import Callable
 
 import numpy as np
@@ -27,7 +28,8 @@ def wrapper_process(runner: Callable[[RunParam], None]) -> Callable[[RunParam], 
         if g.redirect_output_to_log_file:
             os.makedirs("./log", exist_ok=True)
             log_file_path = f'./log/output_{abs(hash(g))}.log'
-            print("Redirect stdout of", g, "to", log_file_path)
+            print(f" *** Redirect stdout of following session to \"{log_file_path}\"")
+            pprint(g)
             with open(log_file_path, 'w') as f, redirect_stdout(f):
                 return runner(g)
         else:

@@ -3,3 +3,6 @@
 /log/
 /out/
 /sato_tougou/
+/.venv
+/**/__pycache__
+/.idea

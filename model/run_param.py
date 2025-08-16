@@ -16,6 +16,7 @@ class RunParam:
     seed_system: int  # ハミルトニアンに含まれる係数を作るためのシード（非可積分系でしか使われない）
     seed_time_evol: int  # 時間発展演算子を作るためのシード
     seed_theta_init: int  # パラメータthetaを作るためのシード
+    dataset_noise_std: float
 
     # オプションパラメータ（デフォルト値付き）
     c_depth: int = 3
@@ -24,7 +25,6 @@ class RunParam:
     seed_train: int = 0
     n_train: int = 200
     n_test: int = 200
-    dataset_noise_std: float = 0.05
     show_progress_bar: bool = True  # 進捗バーを表示するかどうか
     redirect_output_to_log_file: bool = False
     # アーリーストッピング用パラメータ

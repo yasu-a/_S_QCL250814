@@ -63,7 +63,8 @@ class GlobalConfig:
     n_cpu: int
     max_iter: int
     abs_tol: float
-
+    dataset_noise_std: float
+    
     def __post_init__(self):
         if not isinstance(self.n_cpu, int) or self.n_cpu < -2:
             raise ValueError(
@@ -75,6 +76,8 @@ class GlobalConfig:
             raise ValueError(f"max_iter must be positive: {self.max_iter}")
         if self.abs_tol <= 0:
             raise ValueError(f"abs_tol must be positive: {self.abs_tol}")
+        if self.dataset_noise_std < 0:
+            raise ValueError(f"dataset_noise_std must be non-negative: {self.dataset_noise_std}")
 
     @classmethod
     def from_json(cls, body):
@@ -82,6 +85,7 @@ class GlobalConfig:
             n_cpu=body["n_cpu"],
             max_iter=body["max_iter"],
             abs_tol=body["abs_tol"],
+            dataset_noise_std=body["dataset_noise_std"],
         )
 
     @property
@@ -193,6 +197,7 @@ def main(config_json_path: str):
                     seed_theta_init=generate_random_seed(),
                     show_progress_bar=False,
                     redirect_output_to_log_file=True,
+                    dataset_noise_std=config.global_config.dataset_noise_std,
                 )
             )
     random.shuffle(run_params)

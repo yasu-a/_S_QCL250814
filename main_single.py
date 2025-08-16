@@ -17,6 +17,7 @@ def _main(
         opt_method: OptMethodType = "BFGS",
         max_iter: int = 1000,
         abs_tol: float = 1e-7,
+        dataset_noise_std: float = 0.01,
 ) -> None:
     """メイン実行関数
     
@@ -51,6 +52,7 @@ def _main(
             seed_system=seed_system,
             seed_time_evol=seed_time_evol,
             seed_theta_init=seed_theta_init,
+            dataset_noise_std=dataset_noise_std,
         )
         run(run_param)
 
@@ -104,18 +106,25 @@ def main() -> None:
         default=1e-7,
         help="最適化でコストがこれ以下になったら中断（デフォルト: 1e-7）"
     )
+    parser.add_argument(
+        "--dataset-noise-std", "--noise",
+        type=float,
+        default=0.01,
+        help="データセットに追加するガウシアンノイズの標準偏差",
+    )
 
     args = parser.parse_args()
 
     # アンダースコアに変換してキーワード引数として渡す
     _main(
         n_run=args.n_run,
-        nqubit=args.n_qubit,  # --n-qubit -> args.n_qubit
+        nqubit=args.n_qubit,
         func_type=args.func_type,
         method=args.method,
         opt_method=args.opt_method,
         max_iter=args.max_iter,
         abs_tol=args.abs_tol,
+        dataset_noise_std=args.dataset_noise_std,
     )
 
 

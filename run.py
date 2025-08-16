@@ -4,7 +4,6 @@ import os
 import time
 from contextlib import redirect_stdout
 from functools import lru_cache, reduce, wraps
-from pprint import pprint
 from typing import Callable
 
 import numpy as np
@@ -111,7 +110,7 @@ def wrap_process(runner: Callable[[RunParam], None]) -> Callable[[RunParam], Non
             log_file_path = f'./log/output_{abs(hash(g))}.log'
             print(
                 f" *** Redirect stdout of following session to \"{log_file_path}\"")
-            pprint(g)
+            print(g)
             with open(log_file_path, 'w') as f, redirect_stdout(f):
                 return runner(g)
         else:

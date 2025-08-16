@@ -748,6 +748,7 @@ def run(g: RunParam) -> None:
 
             func_type=g.func_type,
             method=g.method,
+            dataset_noise_std=g.dataset_noise_std,
 
             opt_method=g.opt_method,
             opt_options=minimize_kwargs_str,

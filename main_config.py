@@ -3,6 +3,7 @@ import os
 import random
 import warnings
 from dataclasses import dataclass
+from pprint import pprint
 
 import joblib
 import pandas as pd
@@ -156,7 +157,7 @@ def main(config_json_path: str):
         except Exception as e:
             raise ValueError(
                 f"Failed to load config json: \"{config_json_path}\". {type(e).__name__!s}: {e}")
-        print(config)
+        pprint(config)
 
     # create run parameters
     run_params: list[RunParam] = []

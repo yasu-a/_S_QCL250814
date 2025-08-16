@@ -47,6 +47,7 @@ class GlobalRecord:
 
     func_type: FuncType
     method: MethodType
+    dataset_noise_std: float
 
     opt_method: OptMethodType
     opt_options: str
@@ -90,6 +91,7 @@ class GlobalRecord:
 
             "func_type": self.func_type,
             "method": self.method,
+            "dataset_noise_std": self.dataset_noise_std,
 
             "opt_method": self.opt_method,
             "opt_options": self.opt_options,
@@ -135,6 +137,7 @@ class GlobalRecord:
 
             func_type=body["func_type"],
             method=body["method"],
+            dataset_noise_std=body["dataset_noise_std"],
 
             opt_method=body["opt_method"],
             opt_options=body["opt_options"],

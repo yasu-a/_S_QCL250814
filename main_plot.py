@@ -16,9 +16,15 @@ from tqdm import tqdm
 import repo
 from model.run_record import GlobalRecord
 from model.value import OptMethodType, FuncType, MethodType
+import shutil
 
 OUTPUT_DIR_PATH = "out"
-os.makedirs(OUTPUT_DIR_PATH, exist_ok=True)
+if os.path.exists(OUTPUT_DIR_PATH):
+    if input("Are you sure you delete old data and create new one? (y/n): ").lower().strip() == "y":
+        shutil.rmtree(OUTPUT_DIR_PATH)
+    else:
+        raise ValueError("Aborted. User rejected to delete old data.")
+os.makedirs(OUTPUT_DIR_PATH, exist_ok=False)
 
 
 def read_data():
@@ -26,7 +32,7 @@ def read_data():
     mtimes: list[datetime.datetime] = []
     paths: list[str] = []
 
-    def read_file(path: str) -> tuple[str, int, str]:
+    def read_file(path: str) -> tuple[str, float, str]:
         with open(path, "r") as f:
             return f.read(), os.stat(path).st_mtime, path
 
@@ -126,7 +132,12 @@ def dump_as_csv(records, mtimes):
 
 
 def record_summary(r: GlobalRecord) -> str:
-    return f"{r.method} - {r.func_type}, nqubit={r.nqubit}, {r.opt_method}, {r.train_loss_opt:.2e}, n_iter={max(it.n_iter for it in r.iteration_records)}"
+    return (
+        f"{r.method} - {r.func_type}, nqubit={r.nqubit}, {r.opt_method}, "
+        f"train_loss={r.train_loss_opt:.2e}, test_loss={r.test_loss_opt:.2e}, \n"
+        f"dataset_noise_std={r.dataset_noise_std}, "
+        f"n_iter={max(it.n_iter for it in r.iteration_records)}"
+    )
 
 
 def iter_filtered_records(
@@ -224,7 +235,9 @@ def save_one_data(
         # プロット
         plt.figure(figsize=(10, 6))
         plt.plot(active_record.x_train,
-                 active_record.y_train, "o", label='Teacher')
+                 active_record.y_train, "o", label='Training data', ms=3)
+        plt.plot(active_record.x_test,
+                 active_record.y_test, "o", label='Test data', ms=3)
         plt.plot(active_record.x_plot_init, active_record.y_plot_init, '--',
                  label='Initial Model Prediction', c='gray')
         plt.plot(active_record.x_plot_opt, active_record.y_plot_opt,
@@ -347,13 +360,13 @@ def show_cost_distribution(
                 boxplot_options = dict(
                     showfliers=False,
                     whis=1e+99,
-                    widths=0.1,
+                    widths=0.15,
                 )
                 plt.boxplot(
                     cost_init,
                     **boxplot_options,
-                    label="Initial cost",
-                    positions=[x - 0.15],
+                    label="Initial cost (training data)",
+                    positions=[x - 0.2],
                     boxprops=dict(color='tab:blue'),
                     whiskerprops=dict(color='tab:blue'),
                     capprops=dict(color='tab:blue'),
@@ -363,8 +376,8 @@ def show_cost_distribution(
                 plt.boxplot(
                     cost_opt,
                     **boxplot_options,
-                    label="Optimized cost",
-                    positions=[x - 0.05],
+                    label="Optimized cost (training data)",
+                    positions=[x - 0.1],
                     boxprops=dict(color='tab:red'),
                     whiskerprops=dict(color='tab:red'),
                     capprops=dict(color='tab:red'),
@@ -378,28 +391,27 @@ def show_cost_distribution(
                 boxplot_options = dict(
                     showfliers=False,
                     whis=1e+99,
-                    widths=0.1,
+                    widths=0.15,
                 )
                 plt.boxplot(
                     cost_init,
                     **boxplot_options,
-                    label="Initial cost",
-                    positions=[x + 0.05],
-                    boxprops=dict(color='tab:blue'),
-                    whiskerprops=dict(color='tab:blue'),
-                    capprops=dict(color='tab:blue'),
-                    medianprops=dict(color='tab:blue'),
-
+                    label="Initial cost (test data)",
+                    positions=[x + 0.1],
+                    boxprops=dict(color='tab:cyan'),
+                    whiskerprops=dict(color='tab:cyan'),
+                    capprops=dict(color='tab:cyan'),
+                    medianprops=dict(color='tab:cyan'),
                 )
                 plt.boxplot(
                     cost_opt,
                     **boxplot_options,
-                    label="Optimized cost",
-                    positions=[x + 0.15],
-                    boxprops=dict(color='tab:red'),
-                    whiskerprops=dict(color='tab:red'),
-                    capprops=dict(color='tab:red'),
-                    medianprops=dict(color='tab:red'),
+                    label="Optimized cost (test data)",
+                    positions=[x + 0.2],
+                    boxprops=dict(color='tab:orange'),
+                    whiskerprops=dict(color='tab:orange'),
+                    capprops=dict(color='tab:orange'),
+                    medianprops=dict(color='tab:orange'),
                 )
 
             x += 1
@@ -464,7 +476,7 @@ def show_cost_distribution(
     # plt.grid(axis="y", which="minor", color="black", alpha=0.2)
     plt.gca().yaxis.set_major_locator(ticker.LogLocator(base=10, numticks=999))
     # plt.gca().yaxis.set_minor_locator(ticker.LogLocator(base=10, subs=np.arange(0.1, 1, 0.1), numticks=999))
-    plt.ylim(1e-8, 1e+1)
+    plt.ylim(1e-5, 1e+1)
 
     # 重複した凡例を削除
     # https://stackoverflow.com/questions/13588920/stop-matplotlib-repeating-labels-in-legend
@@ -475,7 +487,7 @@ def show_cost_distribution(
     # 表示
     print(f" ↓ {target_func_type=}, n={n_samples} for each box")
     if n_samples is None:
-        plt.text(0, 1, "NOT AVAILABLE FOR PUBLICATION", size=20)
+        plt.text(0, 1, "NOT AVAILABLE FOR PUBLICATION", size=20, color="red")
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR_PATH, filename))
     plt.show()
@@ -486,16 +498,6 @@ def main():
     records, mtimes, paths = read_data()
     check_seed_duplication(records, paths)
     dump_as_csv(records, mtimes)
-
-    """
-    def save_one_data_with_median_cost(
-            records: list[GlobalRecord],
-            *,
-            opt_method: OptMethodType,
-            n_qubit: int,
-            func_type: FuncType,
-            metho
-    """
 
     for opt_method in ["BFGS"]:
         for n_qubit in [2, 3, 4]:

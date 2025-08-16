@@ -2,9 +2,10 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Callable, Iterable
+from typing import Callable, Iterable
 
-from run_record import GlobalRecord
+from model.run_record import GlobalRecord
+from model.value import FuncType, MethodType, OptMethodType
 
 BASE_DIR_PATH = os.path.join("./", "sato_tougou")
 os.makedirs(BASE_DIR_PATH, exist_ok=True)
@@ -14,9 +15,9 @@ print(f"{ BASE_DIR_PATH=}")
 @dataclass(frozen=True)
 class RecordKey:
     nqubit: int  # qubit数
-    func_type: Literal["gauss10", "gauss5", "gauss3", "tri"]  # 学習する関数の種類（ガウス分布，三角波）
-    method: Literal["conv", "pow_3", "nonint"]  # データアップロードの手法（従来手法＝均一回転角，3のi乗，非可積分系）
-    opt_method: Literal["Nelder-Mead", "BFGS", "SLSQP"]  # 最適化手法
+    func_type: FuncType  # 学習する関数の種類（ガウス分布，三角波）
+    method: MethodType  # データアップロードの手法（従来手法＝均一回転角，3のi乗，非可積分系）
+    opt_method: OptMethodType  # 最適化手法
 
     @classmethod
     def from_record(cls, record: GlobalRecord):

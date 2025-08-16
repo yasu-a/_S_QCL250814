@@ -14,21 +14,103 @@ from qulacs import QuantumCircuit, QuantumState, Observable
 from scipy.optimize import OptimizeResult, minimize
 from tqdm import tqdm
 
+from model.run_param import RunParam
+from model.run_record import IterationRecord, GlobalRecord
+from model.value import FuncType, MethodType
 from repo import put_record
-from run_param import RunParam
-from run_record import IterationRecord, GlobalRecord
 from util import X_mat, Y_mat, Z_mat, fullgate, ham_to_gate_mat, \
     gate_mat_to_gate, ham_to_gate, make_fullgate, CacheSession
 
+"""
+回帰
+ノイズ入れろstd 適当
 
-def wrapper_process(runner: Callable[[RunParam], None]) -> Callable[[RunParam], None]:
+train test split
+ - train loss 200
+ - test loss 200
+ trainと同様にtestの箱ひげを出す
+
+classification
+ - 階段関数(中心は0）をやる
+ - train/test 200/200
+ cross entropy
+ 
+testのスコアが最小のところを使う
+"""
+
+
+class Dataset:
+    def __init__(
+            self,
+            *,
+            func_to_learn: Callable[[np.ndarray], np.ndarray],
+            x_min: float,
+            x_max: float,
+            noise_std: float,
+            seed: int,
+    ):
+        self._func_to_learn = func_to_learn
+        self._x_min = x_min
+        self._x_max = x_max
+        self._noise_std = noise_std
+
+        self._rng = np.random.RandomState(seed)
+
+    def x_seq(self, n: int) -> np.ndarray:
+        return np.linspace(self._x_min, self._x_max, n)
+
+    @classmethod
+    def create_from_func_type(
+            cls,
+            *,
+            func_type: FuncType,
+            x_min: float,
+            x_max: float,
+            noise_std: float,
+            seed: int,
+    ) -> "Dataset":
+        if func_type == "gauss10":
+            def func_to_learn(x):
+                return np.exp(-10 * x ** 2)
+        elif func_type == "gauss5":
+            def func_to_learn(x):
+                return np.exp(-5 * x ** 2)
+        elif func_type == "gauss3":
+            def func_to_learn(x):
+                return np.exp(-3 * x ** 2)
+        elif func_type == "tri":
+            def func_to_learn(x):
+                return np.select(
+                    condlist=[(-1 <= x) & (x <= -0.5), (-0.5 < x)
+                              & (x <= 0.5), (0.5 < x) & (x <= 1)],
+                    choicelist=[-2 * (x + 1), 2 * x, -2 * (x - 1)],
+                )
+        else:
+            assert False, func_type
+        return cls(
+            func_to_learn=func_to_learn,
+            x_min=x_min,
+            x_max=x_max,
+            noise_std=noise_std,
+            seed=seed
+        )
+
+    def create_data(self, n: int) -> tuple[np.ndarray, np.ndarray]:
+        x = self._rng.uniform(self._x_min, self._x_max, n)
+        y = self._func_to_learn(x)
+        y += self._rng.normal(loc=0, scale=self._noise_std, size=n)
+        return x, y
+
+
+def wrap_process(runner: Callable[[RunParam], None]) -> Callable[[RunParam], None]:
     # g.redirect_output_to_log_file is True なら stdout をファイルにリダイレクトする
     @wraps(runner)
     def wrapper(g: RunParam) -> None:
         if g.redirect_output_to_log_file:
             os.makedirs("./log", exist_ok=True)
             log_file_path = f'./log/output_{abs(hash(g))}.log'
-            print(f" *** Redirect stdout of following session to \"{log_file_path}\"")
+            print(
+                f" *** Redirect stdout of following session to \"{log_file_path}\"")
             pprint(g)
             with open(log_file_path, 'w') as f, redirect_stdout(f):
                 return runner(g)
@@ -38,93 +120,62 @@ def wrapper_process(runner: Callable[[RunParam], None]) -> Callable[[RunParam], 
     return wrapper
 
 
-@wrapper_process
-def run(g: RunParam) -> None:
-    # nqubit = 4  # @param {type: "integer"}
-    # c_depth = 3  # @param {type: "integer"}
-    # time_step = 0.77  # @param {type: "number"}
+def create_u_in(
+        *,
+        seed: int,
+        n_qubit: int,
+        time_step: float,
+        method: MethodType,
+        cache_session: CacheSession,
+) -> Callable[[float], qulacs.QuantumCircuit]:
+    rng = np.random.RandomState(seed)
 
-    cache_session = CacheSession()
-
-    if g.func_type == "gauss10":
-        def func_to_learn(x):
-            return np.exp(-10 * x ** 2)
-    elif g.func_type == "gauss5":
-        def func_to_learn(x):
-            return np.exp(-5 * x ** 2)
-    elif g.func_type == "gauss3":
-        def func_to_learn(x):
-            return np.exp(-3 * x ** 2)
-    elif g.func_type == "tri":
-        def func_to_learn(x):
-            return np.select(
-                condlist=[(-1 <= x) & (x <= -0.5), (-0.5 < x) & (x <= 0.5), (0.5 < x) & (x <= 1)],
-                choicelist=[-2 * (x + 1), 2 * x, -2 * (x - 1)],
-            )
-    else:
-        assert False, g.func_type
-
-    x_min, x_max = -1, 1
-    num_x_train = 200
-    # seed_train = 0  # @param {type: "integer"}
-    rng = np.random.RandomState(g.seed_train)
-    x_train = x_min + (x_max - x_min) * rng.rand(num_x_train)
-    y_train = func_to_learn(x_train)
-    mag_noise = 0
-    y_train = y_train + mag_noise * rng.randn(num_x_train)
-    # plt.plot(x_train, y_train, "o")
-
-    # method = "nonint"  # @param ["conv", "pow_3", "nonint"]
-    # seed_system = 1  # @param {type: "integer"}
-
-    rng = np.random.RandomState(g.seed_system)
-
-    if g.method == "conv":
+    if method == "conv":
         # 確認済み
         @cache_session.attach_cache(lru_cache(maxsize=1024))
         def U_in_mat(x: float) -> np.ndarray:
-            ham = np.eye(2 ** g.nqubit, dtype=complex)
-            for i in reversed(range(g.nqubit)):
-                mat = fullgate(g.nqubit, f"Y{i}") * x / 2 / -g.time_step
-                ham @= ham_to_gate_mat(mat, g.time_step)
+            ham = np.eye(2 ** n_qubit, dtype=complex)
+            for i in reversed(range(n_qubit)):
+                mat = fullgate(n_qubit, f"Y{i}") * x / 2 / -time_step
+                ham @= ham_to_gate_mat(mat, time_step)
             return ham
 
         # # 確認済み
         # def U_in(x):
-        #     U = QuantumCircuit(g.nqubit)
+        #     U = QuantumCircuit(n_qubit)
 
-        #     for i in range(g.nqubit):
+        #     for i in range(n_qubit):
         #         U.add_RY_gate(i, x)
 
         #     return U
 
-    elif g.method == "pow_3":
+    elif method == "pow_3":
         # 確認済み
         @cache_session.attach_cache(lru_cache(maxsize=1024))
         def U_in_mat(x: float) -> np.ndarray:
-            ham = np.eye(2 ** g.nqubit, dtype=complex)
-            for i in reversed(range(g.nqubit)):
-                mat = fullgate(g.nqubit, f"Y{i}") * (
-                        x * 3 ** (g.nqubit - 1 - i)) / 2 / -g.time_step  # Qulacsはビット番号が逆
-                ham @= ham_to_gate_mat(mat, g.time_step)
+            ham = np.eye(2 ** n_qubit, dtype=complex)
+            for i in reversed(range(n_qubit)):
+                mat = fullgate(n_qubit, f"Y{i}") * (
+                        x * 3 ** (n_qubit - 1 - i)) / 2 / -time_step  # Qulacsはビット番号が逆
+                ham @= ham_to_gate_mat(mat, time_step)
             return ham
 
         # # 確認済み
         # def U_in(x):
-        #     U = QuantumCircuit(g.nqubit)
+        #     U = QuantumCircuit(n_qubit)
 
-        #     for i in range(g.nqubit):
+        #     for i in range(n_qubit):
         #         U.add_RY_gate(i, x * 3 ** i)
 
         #     return U
 
-    elif g.method == "nonint":
-        Bx_list = rng.uniform(-1, 1, g.nqubit)
-        By_list = rng.uniform(-1, 1, g.nqubit)
-        Bz_list = rng.uniform(-1, 1, g.nqubit)
-        Jmat = np.zeros((g.nqubit, g.nqubit))
-        for i in range(g.nqubit):
-            for j in range(g.nqubit):
+    elif method == "nonint":
+        Bx_list = rng.uniform(-1, 1, n_qubit)
+        By_list = rng.uniform(-1, 1, n_qubit)
+        Bz_list = rng.uniform(-1, 1, n_qubit)
+        Jmat = np.zeros((n_qubit, n_qubit))
+        for i in range(n_qubit):
+            for j in range(n_qubit):
                 Jmat[i][j] = rng.uniform(-1, 1)
 
         # print("Bx_list")
@@ -142,78 +193,92 @@ def run(g: RunParam) -> None:
 
         @cache_session.attach_cache(lru_cache(maxsize=1024))
         def U_in_mat(x: float) -> np.ndarray:
-            dataham = np.zeros((2 ** g.nqubit, 2 ** g.nqubit), dtype=complex)
+            dataham = np.zeros((2 ** n_qubit, 2 ** n_qubit), dtype=complex)
 
-            for i in range(g.nqubit):
+            for i in range(n_qubit):
                 B = Bx_list[i]
-                dataham += B * fullgate(g.nqubit, f"X{i}")
+                dataham += B * fullgate(n_qubit, f"X{i}")
                 B = By_list[i]
-                dataham += B * fullgate(g.nqubit, f"Y{i}")
+                dataham += B * fullgate(n_qubit, f"Y{i}")
                 B = Bz_list[i]
-                dataham += B * fullgate(g.nqubit, f"Z{i}")
+                dataham += B * fullgate(n_qubit, f"Z{i}")
 
-            for i in range(g.nqubit - 1):
-                for j in range(i + 1, g.nqubit):
-                    dataham += Jmat[i][j] * make_fullgate([[i, X_mat], [j, X_mat]], g.nqubit)
-                    dataham += Jmat[i][j] * make_fullgate([[i, Y_mat], [j, Y_mat]], g.nqubit)
-                    dataham += 0.73 * Jmat[i][j] * make_fullgate([[i, Z_mat], [j, Z_mat]], g.nqubit)
+            for i in range(n_qubit - 1):
+                for j in range(i + 1, n_qubit):
+                    dataham += Jmat[i][j] * \
+                               make_fullgate([[i, X_mat], [j, X_mat]], n_qubit)
+                    dataham += Jmat[i][j] * \
+                               make_fullgate([[i, Y_mat], [j, Y_mat]], n_qubit)
+                    dataham += 0.73 * \
+                               Jmat[i][j] * \
+                               make_fullgate([[i, Z_mat], [j, Z_mat]], n_qubit)
 
             return ham_to_gate_mat(dataham, x)  # exp(-iHt) ではなく exp(-iHx) の形
 
     def U_in(x) -> qulacs.QuantumCircuit:
-        U = QuantumCircuit(g.nqubit)
+        U = QuantumCircuit(n_qubit)
         mat = U_in_mat(x)
         gate = gate_mat_to_gate(mat)
         U.add_gate(gate)
         return U
 
-    # 確認用コード
-    print(f"{g.method=}")
-    s = QuantumState(g.nqubit)
-    s.set_zero_state()
-    U_in(0.1).update_quantum_state(s)
-    with np.printoptions(precision=3, suppress=True, linewidth=70):
-        print(np.array2string(s.get_vector(), separator=","))
+    return U_in
 
+
+def create_time_evol_gate(*, seed: int, n_qubit: int, time_step: float) -> qulacs.QuantumGateMatrix:
     # ランダム磁場・ランダム結合イジングハミルトニアンをつくって時間発展演算子をつくる
+    rng = np.random.RandomState(seed)
 
-    # seed_time_evol = 2  # @param {type: "integer"}
-
-    rng = np.random.RandomState(g.seed_time_evol)
-
-    ham = np.zeros((2 ** g.nqubit, 2 ** g.nqubit), dtype=complex)
-    for i in range(g.nqubit):  # i runs 0 to g.nqubit-1
+    ham = np.zeros((2 ** n_qubit, 2 ** n_qubit), dtype=complex)
+    for i in range(n_qubit):  # i runs 0 to n_qubit-1
         Jx = -1. + 2. * rng.rand()  # -1~1の乱数
-        ham += Jx * fullgate(g.nqubit, f"X{i}")
-        for j in range(i + 1, g.nqubit):
+        ham += Jx * fullgate(n_qubit, f"X{i}")
+        for j in range(i + 1, n_qubit):
             J_ij = -1. + 2. * rng.rand()
-            ham += J_ij * fullgate(g.nqubit, f"Z{i},Z{j}")
+            ham += J_ij * fullgate(n_qubit, f"Z{i},Z{j}")
 
     # 対角化して時間発展演算子をつくる. H*P = P*D <-> H = P*D*P^dagger
-    time_evol_gate = ham_to_gate(ham, g.time_step)
+    time_evol_gate = ham_to_gate(ham, time_step)
 
-    with np.printoptions(suppress=True, precision=3, linewidth=999):
-        print(time_evol_gate.get_matrix())
+    return time_evol_gate
 
+
+def create_u_out(
+        *,
+        cache_session: CacheSession,
+        c_depth: int,
+        n_qubit: int,
+        time_step: float,
+        time_evol_gate: qulacs.QuantumGateMatrix,
+) -> Callable[[np.ndarray], qulacs.QuantumCircuit]:
     @cache_session.attach_cache(lru_cache(maxsize=1024))
-    def U_out_mat(theta) -> np.ndarray:
-        theta = theta.reshape(g.c_depth, g.nqubit, 3)[:, ::-1,
-                :].flatten()  # qulacs.ParametricQuantumCircuitはnqubitに渡って逆順にパラメータを渡しているので整合性をとる
+    def U_out_mat(theta: np.ndarray) -> np.ndarray:
+        theta = theta.reshape(c_depth, n_qubit, 3)[:, ::-1, :].flatten()
+        # ^ qulacs.ParametricQuantumCircuitはnqubitに渡って逆順にパラメータを渡しているので整合性をとる
         theta_it = iter(theta)
 
         gate_mat_lst = []
-        for d in range(g.c_depth):
+        for d in range(c_depth):
             gate_mat_lst.append(time_evol_gate.get_matrix())
-            for i in range(g.nqubit):
+            for i in range(n_qubit):
                 gate_mat_lst.append(
-                    ham_to_gate_mat(fullgate(g.nqubit, f"X{i}") * next(theta_it) / 2 / -g.time_step,
-                                    g.time_step))
+                    ham_to_gate_mat(
+                        fullgate(n_qubit, f"X{i}") * next(theta_it) / 2 / -time_step,
+                        time_step,
+                    )
+                )
                 gate_mat_lst.append(
-                    ham_to_gate_mat(fullgate(g.nqubit, f"Z{i}") * next(theta_it) / 2 / -g.time_step,
-                                    g.time_step))
+                    ham_to_gate_mat(
+                        fullgate(n_qubit, f"Z{i}") * next(theta_it) / 2 / -time_step,
+                        time_step,
+                    )
+                )
                 gate_mat_lst.append(
-                    ham_to_gate_mat(fullgate(g.nqubit, f"X{i}") * next(theta_it) / 2 / -g.time_step,
-                                    g.time_step))
+                    ham_to_gate_mat(
+                        fullgate(n_qubit, f"X{i}") * next(theta_it) / 2 / -time_step,
+                        time_step,
+                    )
+                )
 
         try:
             next(theta_it)
@@ -226,15 +291,72 @@ def run(g: RunParam) -> None:
 
         return total_gate_mat
 
-    def U_out(theta) -> QuantumCircuit:
-        U = QuantumCircuit(g.nqubit)
+    def U_out(theta: np.ndarray) -> QuantumCircuit:
+        U = QuantumCircuit(n_qubit)
         mat = U_out_mat(theta)
         gate = gate_mat_to_gate(mat)
         U.add_gate(gate)
         return U
 
+    return U_out
+
+
+@wrap_process
+def run(g: RunParam) -> None:
+    cache_session = CacheSession()
+
+    # データの生成
+    ds = Dataset.create_from_func_type(
+        func_type=g.func_type,
+        x_min=-1.0,
+        x_max=+1.0,
+        noise_std=g.dataset_noise_std,
+        seed=g.seed_train,
+    )
+    x_train, y_train = ds.create_data(g.n_train)
+    x_test, y_test = ds.create_data(g.n_test)
+
+    # U_in
+    U_in = create_u_in(
+        seed=g.seed_system,
+        n_qubit=g.nqubit,
+        method=g.method,
+        time_step=g.time_step,
+        cache_session=cache_session,
+    )
+
+    # 確認用コード
+    print(f"{g.method=}")
+    s = QuantumState(g.nqubit)
+    s.set_zero_state()
+    U_in(0.1).update_quantum_state(s)
+    with np.printoptions(precision=3, suppress=True, linewidth=70):
+        print(np.array2string(s.get_vector(), separator=","))
+
+    # ランダム磁場・ランダム結合イジングハミルトニアンをつくって時間発展演算子をつくる
+    time_evol_gate = create_time_evol_gate(
+        seed=g.seed_time_evol,
+        n_qubit=g.nqubit,
+        time_step=g.time_step,
+    )
+
+    # 確認用コード
+    with np.printoptions(suppress=True, precision=3, linewidth=999):
+        print(time_evol_gate.get_matrix())
+
+    # U_out
+    U_out = create_u_out(
+        cache_session=cache_session,
+        c_depth=g.c_depth,
+        n_qubit=g.nqubit,
+        time_step=g.time_step,
+        time_evol_gate=time_evol_gate,
+    )
+
+    # パラメータ数
     parameter_count = 3 * g.nqubit * g.c_depth
 
+    # 確認用コード
     print(f"{g.method=}")
     rng = np.random.RandomState(9999)
     theta_init = rng.uniform(0, 2 * np.pi, parameter_count)
@@ -251,11 +373,7 @@ def run(g: RunParam) -> None:
 
     # オブザーバブルZ_0を作成
     obs = Observable(g.nqubit)
-    # obs_coeff = 2  # @param {type: "number"}
     obs.add_operator(g.obs_coeff, 'Z 0')
-
-    # オブザーバブル2 * Zを設定。ここで2を掛けているのは、最終的な<Z>の値域を広げるためである。
-    # 未知の関数に対応するためには、この定数もパラメータの一つとして最適化する必要がある。
 
     # 入力x_iからモデルの予測値y(x_i, theta)を返す関数
     def qcl_pred(x, theta):
@@ -288,7 +406,7 @@ def run(g: RunParam) -> None:
 
     # パラメータthetaの初期値のもとでのグラフ
     print(f"{g.method=}")
-    xlist = np.arange(x_min, x_max, 0.02)
+    xlist = ds.x_seq(n=100)
     # y_init = [qcl_pred(x, theta_init) for x in xlist]
     # plt.plot(xlist, y_init)
 
@@ -349,7 +467,8 @@ def run(g: RunParam) -> None:
         # プログレスバーの更新
         if pbar is not None:
             pbar.update()
-            pbar.set_description(f"Iteration #{n_iter}, {cost_init=:.7f}, {current_cost=:.7f}")
+            pbar.set_description(
+                f"Iteration #{n_iter}, {cost_init=:.7f}, {current_cost=:.7f}")
 
         # 現在の状況の表示
         if time_now - time_info >= 30:  # 30秒に1回だけ状況を表示

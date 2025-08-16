@@ -1,8 +1,9 @@
 import re
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
+
+from model.value import MethodType, FuncType, OptMethodType
 
 
 @dataclass(slots=True)
@@ -35,10 +36,10 @@ class GlobalRecord:
 
     obs_coeff: float
 
-    func_type: Literal["gauss10", "gauss5", "gauss3", "tri"]
-    method: Literal["conv", "pow_3", "nonint"]
+    func_type: FuncType
+    method: MethodType
 
-    opt_method: Literal["Nelder-Mead", "BFGS", "SLSQP"]
+    opt_method: OptMethodType
     opt_options: str
 
     seed_train: int

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Literal
+
+from model.value import MethodType, FuncType, OptMethodType
 
 
 @dataclass(frozen=True)
@@ -7,9 +8,9 @@ class RunParam:
     """run関数のパラメータを格納するデータクラス"""
     # 必須パラメータ
     nqubit: int  # qubit数
-    func_type: Literal["gauss10", "gauss5", "gauss3", "tri"]  # 学習する関数の種類（ガウス分布，三角波）
-    method: Literal["conv", "pow_3", "nonint"]  # データアップロードの手法（従来手法＝均一回転角，3のi乗，非可積分系）
-    opt_method: Literal["Nelder-Mead", "BFGS", "SLSQP"]  # 最適化手法
+    func_type: FuncType  # 学習する関数の種類（ガウス分布，三角波）
+    method: MethodType  # データアップロードの手法（従来手法＝均一回転角，3のi乗，非可積分系）
+    opt_method: OptMethodType  # 最適化手法
     max_iter: int  # 最適化の最大イテレーション回数
     abs_tol: float  # 最適化でコストがこれ以下になったら中断
     seed_system: int  # ハミルトニアンに含まれる係数を作るためのシード（非可積分系でしか使われない）
@@ -21,6 +22,9 @@ class RunParam:
     time_step: float = 0.77
     obs_coeff: float = 2.0
     seed_train: int = 0
+    n_train: int = 200
+    n_test: int = 200
+    dataset_noise_std: float = 0.05
     show_progress_bar: bool = True  # 進捗バーを表示するかどうか
     redirect_output_to_log_file: bool = False
 

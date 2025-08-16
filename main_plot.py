@@ -5,7 +5,7 @@ import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, fields
-from typing import Iterable, Literal
+from typing import Iterable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +14,8 @@ from matplotlib import ticker
 from tqdm import tqdm
 
 import repo
-from run_record import GlobalRecord
+from model.run_record import GlobalRecord
+from model.value import OptMethodType, FuncType, MethodType
 
 OUTPUT_DIR_PATH = "out"
 os.makedirs(OUTPUT_DIR_PATH, exist_ok=True)
@@ -127,10 +128,10 @@ def record_summary(r: GlobalRecord) -> str:
 def iter_filtered_records(
         records,
         *,
-        opt_method: Literal["Nelder-Mead", "SLSQP", "BFGS"] = None,
+        opt_method: OptMethodType = None,
         nqubit: int = None,
-        func_type: Literal["gauss10", "gauss5", "gauss3", "tri"] = None,
-        method: Literal["conv", "pow_3", "nonint"] = None,
+        func_type: FuncType = None,
+        method: MethodType = None,
 ) -> Iterable[GlobalRecord]:
     for r in records:
         if opt_method is not None and r.opt_method != opt_method:
@@ -156,10 +157,10 @@ def save_one_data(
         records: list[GlobalRecord],
         *,
         filename_prefix: str,
-        opt_method: Literal["Nelder-Mead", "SLSQP", "BFGS"],
+        opt_method: OptMethodType,
         n_qubit: int,
-        func_type: Literal["gauss10", "gauss5", "gauss3", "tri"],
-        method: Literal["conv", "pow_3", "nonint"],
+        func_type: FuncType,
+        method: MethodType,
         sample_index: int,
         show=False,
 ) -> None:
@@ -242,10 +243,10 @@ def save_one_data(
 def save_one_data_with_median_cost(
         records: list[GlobalRecord],
         *,
-        opt_method: Literal["Nelder-Mead", "SLSQP", "BFGS"],
+        opt_method: OptMethodType,
         n_qubit: int,
-        func_type: Literal["gauss10", "gauss5", "gauss3", "tri"],
-        method: Literal["conv", "pow_3", "nonint"],
+        func_type: FuncType,
+        method: MethodType,
 ) -> None:
     rs = list(
         iter_filtered_records(
@@ -282,10 +283,10 @@ def show_cost_distribution(
         records: list[GlobalRecord],
         *,
         filename: str,
-        target_opt_method: Literal["Nelder-Mead", "SLSQP", "BFGS"],
+        target_opt_method: OptMethodType,
         target_nqubit_lst: list[int],
-        target_func_type: Literal["gauss10", "gauss5", "gauss3", "tri"],
-        target_method_lst: list[Literal["conv", "pow_3", "nonint"]],
+        target_func_type: FuncType,
+        target_method_lst: list[MethodType],
         n_samples: int,
         wide: bool = False,
 ):
@@ -454,9 +455,9 @@ def main():
     def save_one_data_with_median_cost(
             records: list[GlobalRecord],
             *,
-            opt_method: Literal["Nelder-Mead", "SLSQP", "BFGS"],
+            opt_method: OptMethodType,
             n_qubit: int,
-            func_type: Literal["gauss10", "gauss5", "gauss3", "tri"],
+            func_type: FuncType,
             metho
     """
 

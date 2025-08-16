@@ -1,26 +1,28 @@
 import json
 import os
 import random
+import warnings
 from dataclasses import dataclass
-from typing import Literal
 
 import joblib
+import pandas as pd
 from tqdm import tqdm
 
 import repo
 from generate_random_seed import generate_random_seed
+from model.run_param import RunParam
+from model.value import OptMethodType, FuncType, MethodType
 from repo import RecordKey
 from run import run
-from run_param import RunParam
 
 
 @dataclass(frozen=True)
 class SessionEntry:
     n_run: int
     n_qubit: int
-    func_type: Literal["gauss10", "gauss5", "gauss3", "tri"]
-    method: Literal["conv", "pow_3", "nonint"]
-    opt_method: Literal["Nelder-Mead", "SLSQP", "BFGS"]
+    func_type: FuncType
+    method: MethodType
+    opt_method: OptMethodType
 
     def __post_init__(self):
         if self.n_run <= 0:
@@ -154,16 +156,27 @@ def main(config_json_path: str):
 
     # create run parameters
     run_params: list[RunParam] = []
+    session_info_list = []
     for session in config.sessions:
         # find number of tasks left in the session
         n_run_current = repo.count_records(session.to_record_key())
         n_run_required = session.n_run
         if n_run_current > n_run_required:
-            print(
-                f"Warning: {session.to_record_key()} has {n_run_current} records, but {n_run_required} are required")
+            warnings.warn(
+                f"Warning: {session.to_record_key()} has {n_run_current} records, but {n_run_required} are required"
+            )
             n_run_required = n_run_current
         n_rest = n_run_required - n_run_current
-        print(" -", session, n_rest)
+        # sessionの各フィールドを展開してDataFrameに格納
+        session_info_list.append({
+            "opt_method": session.opt_method,
+            "n_run": session.n_run,
+            "n_qubit": session.n_qubit,
+            "func_type": session.func_type,
+            "method": session.method,
+            "n_run_current": n_run_current,
+            "n_rest": n_rest
+        })
 
         # generate run params
         for _ in range(n_rest):
@@ -183,6 +196,11 @@ def main(config_json_path: str):
                 )
             )
     random.shuffle(run_params)
+
+    # pandas.DataFrameとして表示
+    df_sessions = pd.DataFrame(session_info_list)
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.width', 1000):
+        print(df_sessions)
 
     # run with joblib
     with joblib.Parallel(n_jobs=config.global_config.n_cpu_actual) as parallel:

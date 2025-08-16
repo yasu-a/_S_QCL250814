@@ -1,20 +1,20 @@
 import argparse
-from typing import Literal
 
 from tqdm import tqdm
 
 from generate_random_seed import generate_random_seed
+from model.run_param import RunParam
+from model.value import FuncType, MethodType, OptMethodType
 from run import run
-from run_param import RunParam
 
 
 def _main(
         *,
         n_run: int = 100,
         nqubit: int,
-        func_type: Literal["gauss10", "gauss5", "gauss3", "tri"],
-        method: Literal["conv", "pow_3", "nonint"],
-        opt_method: Literal["Nelder-Mead", "SLSQP", "BFGS"] = "BFGS",
+        func_type: FuncType,
+        method: MethodType,
+        opt_method: OptMethodType = "BFGS",
         max_iter: int = 1000,
         abs_tol: float = 1e-7,
 ) -> None:

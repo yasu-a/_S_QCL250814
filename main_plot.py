@@ -170,6 +170,7 @@ def save_one_data(
 ) -> None:
     try:
         print(
+            "Saving sample plot",
             dict(
                 opt_method=opt_method,
                 nqubit=n_qubit,

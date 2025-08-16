@@ -25,6 +25,20 @@
         ["BFGS", 100, 4, "gauss5", "pow_3"],
         ["BFGS", 100, 4, "tri", "pow_3"],
         ["BFGS", 100, 4, "gauss5", "nonint"],
-        ["BFGS", 100, 4, "tri", "nonint"]
+        ["BFGS", 100, 4, "tri", "nonint"],
+
+        ["BFGS", 100, 5, "gauss5", "conv"],
+        ["BFGS", 100, 5, "tri", "conv"],
+        ["BFGS", 100, 5, "gauss5", "pow_3"],
+        ["BFGS", 100, 5, "tri", "pow_3"],
+        ["BFGS", 100, 5, "gauss5", "nonint"],
+        ["BFGS", 100, 5, "tri", "nonint"],
+
+        ["BFGS", 100, 6, "gauss5", "conv"],
+        ["BFGS", 100, 6, "tri", "conv"],
+        ["BFGS", 100, 6, "gauss5", "pow_3"],
+        ["BFGS", 100, 6, "tri", "pow_3"],
+        ["BFGS", 100, 6, "gauss5", "nonint"],
+        ["BFGS", 100, 6, "tri", "nonint"]
     ]
 }

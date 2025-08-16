@@ -7,7 +7,6 @@ from functools import lru_cache, reduce, wraps
 from typing import Callable
 
 import numpy as np
-import pandas as pd
 import qulacs
 from qulacs import QuantumCircuit, QuantumState, Observable
 from scipy.optimize import OptimizeResult, minimize
@@ -15,7 +14,7 @@ from tqdm import tqdm
 
 from model.run_param import RunParam
 from model.run_record import IterationRecord, GlobalRecord
-from model.value import FuncType, MethodType
+from model.value import FuncType, MethodType, OptMethodType
 from repo import put_record
 from util import X_mat, Y_mat, Z_mat, fullgate, ham_to_gate_mat, \
     gate_mat_to_gate, ham_to_gate, make_fullgate, CacheSession
@@ -242,6 +241,227 @@ def create_time_evol_gate(*, seed: int, n_qubit: int, time_step: float) -> qulac
     return time_evol_gate
 
 
+# MSE（二乗平均平方誤差）を計算する関数
+def mse(*, y_pred, y_true):
+    return ((y_pred - y_true) ** 2).mean()
+
+
+def fit(
+        *,
+        x_train, y_train,
+        x_val, y_val,
+        target_func_factory: Callable[[np.ndarray, np.ndarray], Callable[[np.ndarray], float]],
+        theta_init: np.ndarray,
+        cache_session: CacheSession,
+        show_progress_bar: bool,
+        opt_method: OptMethodType,
+        max_iter: int,
+        abs_tol: float,
+        # アーリーストッピング用パラメータ
+        early_stopping_enabled: bool,
+        early_stopping_patience: int,
+        early_stopping_min_delta: float,
+):
+    # opt_method = "BFGS" # @param ["Nelder-Mead", "SLSQP", "BFGS"]
+    # max_iter = 100  # @param {type: "integer"}
+    # abs_tol = 1e-5  # @param {type: "number"}  # コストがこれ以下になったら中断
+    eps = 1e-10  # @param {type: "number"}  # 微分の近似に使う小さな値
+
+    n_iter = 0  # callbackで使うイテレーション回数のカウンタ
+    time_start = time.monotonic()  # 開始時刻
+    time_info = time.monotonic()  # 最後に最適化の状態を表示した時刻
+    if show_progress_bar:
+        pbar = tqdm(total=max_iter)  # プログレスバー
+    else:
+        pbar = None
+
+    # 最適化の履歴を記録するリスト
+    loss_history = []
+
+    # アーリーストッピング用の変数
+    best_val_loss = float('inf')  # これまでの最小検証損失
+    patience_counter = 0  # 検証損失が改善されなかったイテレーション数
+    is_early_stopped = False  # アーリーストッピングが発生したかどうか
+
+    # 最初の状態を追加
+    train_loss_init = target_func_factory(x_train, y_train)(theta_init)
+    val_loss = None
+    if early_stopping_enabled:
+        # 検証損失を計算
+        val_loss = target_func_factory(x_val, y_val)(theta_init)
+    record = {
+        "n_iter": 0,
+        "train_loss": train_loss_init,
+        "theta": theta_init,
+        "elapsed_time": 0,
+    }
+    if val_loss is not None:  # early_stopping_enabled is True
+        record["val_loss"] = val_loss
+        record["best_val_loss"] = best_val_loss
+        record["patience_counter"] = patience_counter
+    loss_history.append(record)
+
+    # コールバック関数を定義（松崎変更）→計算途中にコスト関数が見えるようにした
+    def common_callback(n_iter: int, theta: np.ndarray, current_train_loss: float):
+        nonlocal time_info, best_val_loss, patience_counter, is_early_stopped
+
+        # 現在時刻を取得
+        time_now = time.monotonic()
+        elapsed_time = time_now - time_start  # 経過時間
+
+        # アーリーストッピングのチェック
+        val_loss = None
+        if early_stopping_enabled:
+            # 検証損失を計算
+            val_loss = target_func_factory(x_val, y_val)(theta)
+
+            # 検証損失が改善されたかチェック
+            if val_loss < best_val_loss - early_stopping_min_delta:
+                # 改善があった場合
+                best_val_loss = val_loss
+                patience_counter = 0
+            else:
+                # 改善がなかった場合
+                patience_counter += 1
+                print(
+                    f"Validation loss did not improve. Patience: {patience_counter}/{early_stopping_patience}")
+
+                # patienceに達した場合、アーリーストッピング
+                if patience_counter >= early_stopping_patience:
+                    is_early_stopped = True
+                    print(f"Early stopping triggered after {n_iter} iterations")
+                    print(f"Best validation loss: {best_val_loss:.7f}")
+
+        # 履歴の記録
+        record = {
+            "n_iter": n_iter,
+            "train_loss": current_train_loss,
+            "theta": theta,
+            "elapsed_time": elapsed_time,
+        }
+        if val_loss is not None:  # early_stopping_enabled is True
+            record["val_loss"] = val_loss
+            record["best_val_loss"] = best_val_loss
+            record["patience_counter"] = patience_counter
+        loss_history.append(record)
+
+        # プログレスバーの更新
+        if pbar is not None:
+            pbar.update()
+            desc = f"Iteration #{n_iter}, train_loss={current_train_loss:.7f}"
+            if val_loss is not None:
+                desc += f", val_loss={val_loss:.7f}, patience={patience_counter}/{early_stopping_patience}"
+            pbar.set_description(desc)
+
+        # 現在の状況の表示
+        if time_now - time_info >= 30:  # 30秒に1回だけ状況を表示
+            time_info = time_now
+            with np.printoptions(precision=3, suppress=True):
+                info_str = f"Iteration #{n_iter}({datetime.timedelta(seconds=elapsed_time)}), train_loss={current_train_loss:.7f}"
+                if val_loss is not None:
+                    info_str += f", val_loss={val_loss:.7f}, best_val_loss={best_val_loss:.7f}, patience={patience_counter}/{early_stopping_patience}"
+                print(info_str)
+                print(f"Current theta:")
+                print(np.array2string(theta, separator=", ", max_line_width=150))
+            cache_session.print_cache_profile()
+            print()
+
+    if opt_method == "Nelder-Mead":
+        def callback(intermediate_result: OptimizeResult):
+            nonlocal n_iter
+            theta = intermediate_result.x
+            n_iter += 1  # カウントの更新
+            current_train_loss = intermediate_result.fun  # 現在のコストを計算
+            common_callback(n_iter, theta, current_train_loss)
+
+            # アーリーストッピングまたはabs_tol到達で停止
+            if is_early_stopped:
+                raise StopIteration("Early stopping")
+            if current_train_loss < abs_tol:
+                raise StopIteration("Absolute tolerance reached")
+
+        minimize_kwargs = dict(  # minimizeに与えるパラメータをプロットに印字するために分離
+            method='Nelder-Mead',
+            callback=callback,
+            options={
+                'disp': True,
+                'maxiter': max_iter,
+            },
+        )
+    elif opt_method == "SLSQP":
+        assert not early_stopping_enabled, "SLSQP does not support early stopping"
+
+        def callback(theta):
+            nonlocal n_iter
+            n_iter += 1  # カウントの更新
+            current_train_loss = target_func_factory(x_train, y_train)(theta)  # 現在のコストを計算
+            common_callback(n_iter, theta, current_train_loss)
+
+        minimize_kwargs = dict(  # minimizeに与えるパラメータをプロットに印字するために分離
+            method='SLSQP',
+            callback=callback,
+            jac=None,
+            options={
+                'disp': True,
+                'maxiter': max_iter,
+                'ftol': abs_tol,
+                'eps': eps,
+            },
+        )
+    elif opt_method == "BFGS":
+        # コールバック関数を定義（松崎変更）→計算途中にコスト関数が見えるようにした
+        def callback(intermediate_result: OptimizeResult):
+            nonlocal n_iter
+            theta = intermediate_result.x
+            n_iter += 1  # カウントの更新
+            current_train_loss = intermediate_result.fun  # 現在のコストを計算
+            common_callback(n_iter, theta, current_train_loss)
+
+            # アーリーストッピングまたはabs_tol到達で停止
+            if is_early_stopped:
+                raise StopIteration("Early stopping")
+            if current_train_loss < abs_tol:
+                raise StopIteration("Absolute tolerance reached")
+
+        minimize_kwargs = dict(  # minimizeに与えるパラメータをプロットに印字するために分離
+            method="BFGS",
+            callback=callback,
+            jac=None,
+            options={
+                'disp': True,
+                'maxiter': max_iter,
+                'eps': eps,
+            },
+        )
+    else:
+        assert False, f"invalid method '{opt_method}'"
+
+    # minimize_kwargsの文字列化
+    minimize_kwargs_str = ", ".join(
+        f"{k}={v}"
+        for k, v in (minimize_kwargs | minimize_kwargs["options"]).items()
+        if k not in {"callback", "options", "disp"}
+    )
+
+    print(" *** Optimizer options")
+    print(minimize_kwargs_str)
+    print()
+
+    # 学習 (筆者のPCで1~2分程度かかる)（松崎変更）callbackを追加
+    try:
+        minimize(
+            target_func_factory(x_train, y_train),
+            theta_init,
+            **minimize_kwargs,  # ここでまとめて与える
+        )
+    except KeyboardInterrupt:
+        is_intermediate_result = True
+    else:
+        is_intermediate_result = False
+
+    return minimize_kwargs_str, loss_history, is_intermediate_result, is_early_stopped
+
+
 def create_u_out(
         *,
         cache_session: CacheSession,
@@ -391,17 +611,19 @@ def run(g: RunParam) -> None:
         return res
 
     # cost function Lを計算
-    def cost_func(theta):
-        y_pred = [qcl_pred(x, theta) for x in x_train]
-        L = ((y_pred - y_train) ** 2).mean()  # quadratic loss
-        return L
+    def cost_factory(x_data: np.ndarray, y_data: np.ndarray):
+        def cost(theta):
+            y_pred = np.array([qcl_pred(x, theta) for x in x_data])
+            loss = mse(y_pred=y_pred, y_true=y_data)
+            return loss
+
+        return cost
 
     """# 学習"""
 
     # seed_theta_init = 123  # @param {type: "integer"}
     rng = np.random.RandomState(g.seed_theta_init)
     theta_init = rng.uniform(0, 2 * np.pi, parameter_count)
-    cost_init = cost_func(theta_init)
 
     # パラメータthetaの初期値のもとでのグラフ
     print(f"{g.method=}")
@@ -423,158 +645,38 @@ def run(g: RunParam) -> None:
     }
     system_setup_str = json.dumps(system_setup_dct)
 
-    # opt_method = "BFGS" # @param ["Nelder-Mead", "SLSQP", "BFGS"]
-    # max_iter = 100  # @param {type: "integer"}
-    # abs_tol = 1e-5  # @param {type: "number"}  # コストがこれ以下になったら中断
-    eps = 1e-10  # @param {type: "number"}  # 微分の近似に使う小さな値
-
-    n_iter = 0  # callbackで使うイテレーション回数のカウンタ
-    time_start = time.monotonic()  # 開始時刻
-    time_info = time.monotonic()  # 最後に最適化の状態を表示した時刻
-    if g.show_progress_bar:
-        pbar = tqdm(total=g.max_iter)  # プログレスバー
-    else:
-        pbar = None
-
-    # 最適化の履歴を記録するリスト
-    cost_history = []
-
-    # 最初の状態を追加
-    cost_history.append({
-        "n_iter": 0,
-        "cost": cost_init,
-        "theta": theta_init,
-        "elapsed_time": 0,
-    })
-
-    # コールバック関数を定義（松崎変更）→計算途中にコスト関数が見えるようにした
-    def common_callback(n_iter: int, theta: np.ndarray, current_cost: float):
-        nonlocal time_info
-
-        # 現在時刻を取得
-        time_now = time.monotonic()
-        elapsed_time = time_now - time_start  # 経過時間
-
-        # 履歴の記録
-        cost_history.append({
-            "n_iter": n_iter,
-            "cost": current_cost,
-            "theta": theta,
-            "elapsed_time": elapsed_time,
-        })
-
-        # プログレスバーの更新
-        if pbar is not None:
-            pbar.update()
-            pbar.set_description(
-                f"Iteration #{n_iter}, {cost_init=:.7f}, {current_cost=:.7f}")
-
-        # 現在の状況の表示
-        if time_now - time_info >= 30:  # 30秒に1回だけ状況を表示
-            time_info = time_now
-            with np.printoptions(precision=3, suppress=True):
-                print(
-                    f"Iteration #{n_iter}({datetime.timedelta(seconds=elapsed_time)}), {cost_init=:.7f}, {current_cost=:.7f}")
-                print(f"Current theta:")
-                print(np.array2string(theta, separator=", ", max_line_width=150))
-            cache_session.print_cache_profile()
-            print()
-
-    if g.opt_method == "Nelder-Mead":
-        def callback(intermediate_result: OptimizeResult):
-            nonlocal n_iter
-            theta = intermediate_result.x
-            n_iter += 1  # カウントの更新
-            current_cost = intermediate_result.fun  # 現在のコストを計算
-            common_callback(n_iter, theta, current_cost)
-            if current_cost < g.abs_tol:
-                raise StopIteration()
-
-        minimize_kwargs = dict(  # minimizeに与えるパラメータをプロットに印字するために分離
-            method='Nelder-Mead',
-            callback=callback,
-            options={
-                'disp': True,
-                'maxiter': g.max_iter,
-            },
-        )
-    elif g.opt_method == "SLSQP":
-        def callback(theta):
-            nonlocal n_iter
-            n_iter += 1  # カウントの更新
-            current_cost = cost_func(theta)  # 現在のコストを計算
-            common_callback(n_iter, theta, current_cost)
-
-        minimize_kwargs = dict(  # minimizeに与えるパラメータをプロットに印字するために分離
-            method='SLSQP',
-            callback=callback,
-            jac=None,
-            options={
-                'disp': True,
-                'maxiter': g.max_iter,
-                'ftol': g.abs_tol,
-                'eps': eps,
-            },
-        )
-    elif g.opt_method == "BFGS":
-        # コールバック関数を定義（松崎変更）→計算途中にコスト関数が見えるようにした
-        def callback(intermediate_result: OptimizeResult):
-            nonlocal n_iter
-            theta = intermediate_result.x
-            n_iter += 1  # カウントの更新
-            current_cost = intermediate_result.fun  # 現在のコストを計算
-            common_callback(n_iter, theta, current_cost)
-            if current_cost < g.abs_tol:
-                raise StopIteration()
-
-        minimize_kwargs = dict(  # minimizeに与えるパラメータをプロットに印字するために分離
-            method="BFGS",
-            callback=callback,
-            jac=None,
-            options={
-                'disp': True,
-                'maxiter': g.max_iter,
-                'eps': eps,
-            },
-        )
-    else:
-        assert False, f"invalid method '{g.opt_method}'"
-
-    # minimize_kwargsの文字列化
-    minimize_kwargs_str = ", ".join(
-        f"{k}={v}"
-        for k, v in (minimize_kwargs | minimize_kwargs["options"]).items()
-        if k not in {"callback", "options", "disp"}
-    )
-
     print(" *** System setup")
     print(system_setup_str)
     print()
-    print(" *** Optimizer options")
-    print(minimize_kwargs_str)
-    print()
 
-    # 学習 (筆者のPCで1~2分程度かかる)（松崎変更）callbackを追加
-    try:
-        result = minimize(
-            cost_func,
-            theta_init,
-            **minimize_kwargs,  # ここでまとめて与える
-        )
-    except KeyboardInterrupt:
-        # 実行が中断されたらひとまず途中までの結果を最適化の結果とする
-        is_intermediate_result = True
-        theta_opt = cost_history[-1]["theta"]
-        cost_opt = cost_history[-1]["cost"]
-    else:
-        is_intermediate_result = False
-        theta_opt = result.x
-        cost_opt = result.fun
+    minimize_kwargs_str, loss_history, is_intermediate_result, is_early_stopped = fit(
+        x_train=x_train,
+        y_train=y_train,
+        x_val=x_test,
+        y_val=y_test,
+        target_func_factory=cost_factory,
+        theta_init=theta_init,
+        cache_session=cache_session,
+        show_progress_bar=g.show_progress_bar,
+        opt_method=g.opt_method,
+        max_iter=g.max_iter,
+        abs_tol=g.abs_tol,
+        # アーリーストッピング用パラメータ
+        early_stopping_enabled=g.early_stopping_enabled,
+        early_stopping_patience=g.early_stopping_patience,
+        early_stopping_min_delta=g.early_stopping_min_delta,
+    )
+    train_loss_init = loss_history[0]["train_loss"]
+    test_loss_init = loss_history[0]["val_loss"]
+    # 実行が中断されてもひとまず途中までの結果を最適化の結果とする
+    train_loss_opt = loss_history[-1]["train_loss"]
+    test_loss_opt = loss_history[-1]["val_loss"]
+    theta_opt = loss_history[-1]["theta"]
 
-    # 履歴のdataframeを作る
-    df_cost = pd.DataFrame(cost_history)
-    df_cost["elapsed_time_str"] = df_cost["elapsed_time"].map(
-        lambda x: f"\n{datetime.timedelta(seconds=int(x))}")
+    # # 履歴のdataframeを作る
+    # df_loss_history = pd.DataFrame(loss_history)
+    # df_loss_history["elapsed_time_str"] \
+    #     = df_loss_history["elapsed_time"].map(lambda x: f"\n{datetime.timedelta(seconds=int(x))}")
 
     if is_intermediate_result:
         for _ in range(5):
@@ -583,6 +685,13 @@ def run(g: RunParam) -> None:
             print("!!! OPTIMIZATION INTERRUPTED, NOT FINAL RESULT !!!")
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             print()
+    elif is_early_stopped:
+        for _ in range(3):
+            print()
+            print("*** EARLY STOPPING ACTIVATED ***")
+            print(
+                f"*** Training stopped after {len(loss_history) - 1} iterations due to no improvement in validation loss ***")
+            print()
     print()
     print(" *** System setup")
     print(system_setup_str)
@@ -590,11 +699,11 @@ def run(g: RunParam) -> None:
     print(" *** Optimizer options")
     print(minimize_kwargs_str)
     print()
-    print(f" *** theta_init ({cost_init=:.7f})")
+    print(f" *** theta_init ({train_loss_init=:.7f})")
     with np.printoptions(precision=7, suppress=True):
         print(theta_init)
     print()
-    print(f" *** theta_opt ({cost_opt=:.7f})")
+    print(f" *** theta_opt ({train_loss_opt=:.7f})")
     with np.printoptions(precision=7, suppress=True):
         print(theta_opt)
 
@@ -618,14 +727,17 @@ def run(g: RunParam) -> None:
     # plt.legend()
     # plt.show()
 
-    if not is_intermediate_result:  # 中断されていなければ保存
+    if not is_intermediate_result:  # 中断されていなければ保存（アーリーストッピングは含む）
         iteration_records = [
             IterationRecord(
                 n_iter=h["n_iter"],
                 elapsed_time=h["elapsed_time"],
-                cost=float(h["cost"]),  # np.float64 -> float
+                train_loss=float(h["train_loss"]),  # np.float64 -> float
+                val_loss=float(h["val_loss"]),  # np.float64 -> float
+                best_val_loss=float(h["best_val_loss"]),  # np.float64 -> float
+                patience_counter=int(h["patience_counter"]),  # np.int64 -> int
             )
-            for h in cost_history
+            for h in loss_history
         ]
         global_record = GlobalRecord(
             nqubit=g.nqubit,
@@ -647,16 +759,25 @@ def run(g: RunParam) -> None:
 
             x_train=x_train,
             y_train=y_train,
+            y_pred_train_init=np.array([qcl_pred(x, theta_init) for x in x_train]),
+            y_pred_train_opt=np.array([qcl_pred(x, theta_opt) for x in x_train]),
 
-            x_test=xlist,
+            x_test=x_test,
+            y_test=y_test,
+            y_pred_test_init=np.array([qcl_pred(x, theta_init) for x in x_test]),
+            y_pred_test_opt=np.array([qcl_pred(x, theta_opt) for x in x_test]),
 
             theta_init=theta_init,
-            y_pred_init=np.array([qcl_pred(x, theta_init) for x in xlist]),
-            cost_init=cost_init,
+            x_plot_init=xlist,
+            y_plot_init=np.array([qcl_pred(x, theta_init) for x in xlist]),
+            train_loss_init=train_loss_init,
+            test_loss_init=test_loss_init,
 
             theta_opt=theta_opt,
-            y_pred_opt=np.array([qcl_pred(x, theta_opt) for x in xlist]),
-            cost_opt=cost_opt,
+            x_plot_opt=xlist,
+            y_plot_opt=np.array([qcl_pred(x, theta_opt) for x in xlist]),
+            train_loss_opt=train_loss_opt,
+            test_loss_opt=test_loss_opt,
 
             iteration_records=iteration_records,
         )

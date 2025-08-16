@@ -93,7 +93,7 @@ def dump_as_csv(records, mtimes):
             "seed_theta_init": r.seed_theta_init,
             "max_n_iter": r.iteration_records[-1].n_iter,
             "opt_maxiter": r.opt_maxiter,
-            "cost_opt": r.cost_opt,
+            "train_loss_opt": r.train_loss_opt,
             "mtime": mtime,
             "record": r,
         } for r, mtime in zip(records, mtimes)
@@ -106,8 +106,12 @@ def dump_as_csv(records, mtimes):
         "record"].count()
     df_num_data.to_csv(os.path.join(OUTPUT_DIR_PATH, "num_data.csv"))
 
-    df_n_iter = df_records.groupby(["opt_maxiter", "opt_method", "func_type", "method", "nqubit"])[
-        "max_n_iter"].describe().astype(int)
+    df_n_iter = (
+        df_records
+        .groupby(["opt_maxiter", "opt_method", "func_type", "method", "nqubit"])["max_n_iter"]
+        .describe()[["count", "mean", "min", "25%", "50%", "75%", "max"]]
+        .astype(int)
+    )
     df_n_iter.to_csv(os.path.join(OUTPUT_DIR_PATH, "n_iter.csv"))
 
     df_not_converged = df_records.groupby(
@@ -122,7 +126,7 @@ def dump_as_csv(records, mtimes):
 
 
 def record_summary(r: GlobalRecord) -> str:
-    return f"{r.method} - {r.func_type}, nqubit={r.nqubit}, {r.opt_method}, {r.cost_opt:.2e}, n_iter={max(it.n_iter for it in r.iteration_records)}"
+    return f"{r.method} - {r.func_type}, nqubit={r.nqubit}, {r.opt_method}, {r.train_loss_opt:.2e}, n_iter={max(it.n_iter for it in r.iteration_records)}"
 
 
 def iter_filtered_records(
@@ -206,7 +210,7 @@ def save_one_data(
             for f in fields(active_record):
                 v = getattr(active_record, f.name)
                 if f.name == "iteration_records":
-                    v_str = f"<list of iteration record: cost_init={v[0].cost:.5f}, cost_opt={v[-1].cost:.5f}, n_iter={v[-1].n_iter}, elasped_time={v[-1].elapsed_time:.0f}sec>"
+                    v_str = f"<list of iteration record: cost_init={v[0].train_loss:.5f}, cost_opt={v[-1].train_loss:.5f}, n_iter={v[-1].n_iter}, elasped_time={v[-1].elapsed_time:.0f}sec>"
                 elif isinstance(v, np.ndarray):
                     with np.printoptions(suppress=True, precision=5, linewidth=200):
                         v_str = np.array2string(v, separator=", ", sign=" ")
@@ -220,9 +224,9 @@ def save_one_data(
         plt.figure(figsize=(10, 6))
         plt.plot(active_record.x_train,
                  active_record.y_train, "o", label='Teacher')
-        plt.plot(active_record.x_test, active_record.y_pred_init, '--',
+        plt.plot(active_record.x_plot_init, active_record.y_plot_init, '--',
                  label='Initial Model Prediction', c='gray')
-        plt.plot(active_record.x_test, active_record.y_pred_opt,
+        plt.plot(active_record.x_plot_opt, active_record.y_plot_opt,
                  label='Final Model Prediction')
         plt.title(record_summary(active_record))
         plt.ylim(-1.1, 1.1)
@@ -263,7 +267,7 @@ def save_one_data_with_median_cost(
         )
         return
 
-    cost_array = np.array([r.cost_opt for r in rs])
+    cost_array = np.array([r.train_loss_opt for r in rs])
     median_cost = np.median(cost_array)
     median_cost_index = np.argmin(np.abs(cost_array - median_cost))
     median_cost_record = rs[median_cost_index]
@@ -335,20 +339,20 @@ def show_cost_distribution(
             x_tick_group_id.append(group_id)
 
             if len(rs) != 0:
-                cost_init = np.array([r.cost_init for r in rs])
-                cost_opt = np.array([r.cost_opt for r in rs])
+                cost_init = np.array([r.train_loss_init for r in rs])
+                cost_opt = np.array([r.train_loss_opt for r in rs])
 
                 # (method, nqubit) の箱ひげ図を作る
                 boxplot_options = dict(
                     showfliers=False,
                     whis=1e+99,
-                    widths=0.2,
+                    widths=0.1,
                 )
                 plt.boxplot(
                     cost_init,
                     **boxplot_options,
                     label="Initial cost",
-                    positions=[x - 0.1],
+                    positions=[x - 0.15],
                     boxprops=dict(color='tab:blue'),
                     whiskerprops=dict(color='tab:blue'),
                     capprops=dict(color='tab:blue'),
@@ -359,7 +363,38 @@ def show_cost_distribution(
                     cost_opt,
                     **boxplot_options,
                     label="Optimized cost",
-                    positions=[x + 0.1],
+                    positions=[x - 0.05],
+                    boxprops=dict(color='tab:red'),
+                    whiskerprops=dict(color='tab:red'),
+                    capprops=dict(color='tab:red'),
+                    medianprops=dict(color='tab:red'),
+                )
+
+                cost_init = np.array([r.test_loss_init for r in rs])
+                cost_opt = np.array([r.test_loss_opt for r in rs])
+
+                # (method, nqubit) の箱ひげ図を作る
+                boxplot_options = dict(
+                    showfliers=False,
+                    whis=1e+99,
+                    widths=0.1,
+                )
+                plt.boxplot(
+                    cost_init,
+                    **boxplot_options,
+                    label="Initial cost",
+                    positions=[x + 0.05],
+                    boxprops=dict(color='tab:blue'),
+                    whiskerprops=dict(color='tab:blue'),
+                    capprops=dict(color='tab:blue'),
+                    medianprops=dict(color='tab:blue'),
+
+                )
+                plt.boxplot(
+                    cost_opt,
+                    **boxplot_options,
+                    label="Optimized cost",
+                    positions=[x + 0.15],
                     boxprops=dict(color='tab:red'),
                     whiskerprops=dict(color='tab:red'),
                     capprops=dict(color='tab:red'),

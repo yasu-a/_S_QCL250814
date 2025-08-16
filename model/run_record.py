@@ -10,13 +10,19 @@ from model.value import MethodType, FuncType, OptMethodType
 class IterationRecord:
     n_iter: int
     elapsed_time: float
-    cost: float
+    train_loss: float
+    val_loss: float
+    best_val_loss: float
+    patience_counter: int
 
     def to_json(self):
         return {
             "n_iter": self.n_iter,
             "elapsed_time": self.elapsed_time,
-            "cost": self.cost,
+            "train_loss": self.train_loss,
+            "val_loss": self.val_loss,
+            "best_val_loss": self.best_val_loss,
+            "patience_counter": self.patience_counter,
         }
 
     @classmethod
@@ -24,7 +30,10 @@ class IterationRecord:
         return cls(
             n_iter=body["n_iter"],
             elapsed_time=body["elapsed_time"],
-            cost=body["cost"],
+            train_loss=body["train_loss"],
+            val_loss=body["val_loss"],
+            best_val_loss=body["best_val_loss"],
+            patience_counter=body["patience_counter"],
         )
 
 
@@ -49,16 +58,25 @@ class GlobalRecord:
 
     x_train: np.ndarray
     y_train: np.ndarray
+    y_pred_train_init: np.ndarray
+    y_pred_train_opt: np.ndarray    
 
     x_test: np.ndarray
+    y_test: np.ndarray
+    y_pred_test_init: np.ndarray
+    y_pred_test_opt: np.ndarray
 
     theta_init: np.ndarray
-    y_pred_init: np.ndarray
-    cost_init: float
+    x_plot_init: np.ndarray
+    y_plot_init: np.ndarray
+    train_loss_init: float
+    test_loss_init: float
 
     theta_opt: np.ndarray
-    y_pred_opt: np.ndarray
-    cost_opt: float
+    x_plot_opt: np.ndarray
+    y_plot_opt: np.ndarray
+    train_loss_opt: float
+    test_loss_opt: float
 
     iteration_records: list[IterationRecord]
 
@@ -83,16 +101,25 @@ class GlobalRecord:
 
             "x_train": self.x_train.tolist(),
             "y_train": self.y_train.tolist(),
+            "y_pred_train_init": self.y_pred_train_init.tolist(),
+            "y_pred_train_opt": self.y_pred_train_opt.tolist(),
 
             "x_test": self.x_test.tolist(),
+            "y_test": self.y_test.tolist(),
+            "y_pred_test_init": self.y_pred_test_init.tolist(),
+            "y_pred_test_opt": self.y_pred_test_opt.tolist(),
 
             "theta_init": self.theta_init.tolist(),
-            "y_pred_init": self.y_pred_init.tolist(),
-            "cost_init": self.cost_init,
+            "x_plot_init": self.x_plot_init.tolist(),
+            "y_plot_init": self.y_plot_init.tolist(),
+            "train_loss_init": self.train_loss_init,
+            "test_loss_init": self.test_loss_init,
 
             "theta_opt": self.theta_opt.tolist(),
-            "y_pred_opt": self.y_pred_opt.tolist(),
-            "cost_opt": self.cost_opt,
+            "x_plot_opt": self.x_plot_opt.tolist(),
+            "y_plot_opt": self.y_plot_opt.tolist(),
+            "train_loss_opt": self.train_loss_opt,
+            "test_loss_opt": self.test_loss_opt,
 
             "iteration_records": [x.to_json() for x in self.iteration_records],
         }
@@ -119,20 +146,33 @@ class GlobalRecord:
 
             x_train=np.array(body["x_train"]),
             y_train=np.array(body["y_train"]),
+            y_pred_train_init=np.array(body["y_pred_train_init"]),
+            y_pred_train_opt=np.array(body["y_pred_train_opt"]),
 
             x_test=np.array(body["x_test"]),
+            y_test=np.array(body["y_test"]),
+            y_pred_test_init=np.array(body["y_pred_test_init"]),
+            y_pred_test_opt=np.array(body["y_pred_test_opt"]),
 
             theta_init=np.array(body["theta_init"]),
-            y_pred_init=np.array(body["y_pred_init"]),
-            cost_init=body["cost_init"],
+            x_plot_init=np.array(body["x_plot_init"]),
+            y_plot_init=np.array(body["y_plot_init"]),
+            train_loss_init=body["train_loss_init"],
+            test_loss_init=body["test_loss_init"],
 
             theta_opt=np.array(body["theta_opt"]),
-            y_pred_opt=np.array(body["y_pred_opt"]),
-            cost_opt=body["cost_opt"],
+            x_plot_opt=np.array(body["x_plot_opt"]),
+            y_plot_opt=np.array(body["y_plot_opt"]),
+            train_loss_opt=body["train_loss_opt"],
+            test_loss_opt=body["test_loss_opt"],
 
             iteration_records=[IterationRecord.from_json(x) for x in body["iteration_records"]],
         )
 
     @property
     def opt_maxiter(self):
-        return int(re.search(r"\bmaxiter=(\d+)\b", self.opt_options).group(1))
+        m = re.search(r"\bmaxiter=(\d+)\b", self.opt_options)
+        if m:
+            return int(m.group(1))
+        else:
+            return None

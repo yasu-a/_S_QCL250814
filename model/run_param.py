@@ -27,6 +27,10 @@ class RunParam:
     dataset_noise_std: float = 0.05
     show_progress_bar: bool = True  # 進捗バーを表示するかどうか
     redirect_output_to_log_file: bool = False
+    # アーリーストッピング用パラメータ
+    early_stopping_enabled: bool = True  # アーリーストッピングを有効にするかどうか
+    early_stopping_patience: int = 20  # 検証損失が改善されない状態が何イテレーション続いたら停止するか
+    early_stopping_min_delta: float = 1e-6  # 最小改善量
 
     def __post_init__(self) -> None:
         """パラメータのタイプチェッキングとバリデーション"""
@@ -61,6 +65,12 @@ class RunParam:
             f"show_progress_bar must be bool, got {type(self.show_progress_bar)}"
         assert isinstance(self.redirect_output_to_log_file, bool), \
             f"redirect_output_to_log_file must be bool, got {type(self.redirect_output_to_log_file)}"
+        assert isinstance(self.early_stopping_enabled, bool), \
+            f"early_stopping_enabled must be bool, got {type(self.early_stopping_enabled)}"
+        assert isinstance(self.early_stopping_patience, int), \
+            f"early_stopping_patience must be int, got {type(self.early_stopping_patience)}"
+        assert isinstance(self.early_stopping_min_delta, (float, int)), \
+            f"early_stopping_min_delta must be float or int, got {type(self.early_stopping_min_delta)}"
 
         # 値の範囲チェック
         assert self.nqubit > 0, \
@@ -73,6 +83,10 @@ class RunParam:
             f"max_iter must be positive, got {self.max_iter}"
         assert self.abs_tol > 0, \
             f"abs_tol must be positive, got {self.abs_tol}"
+        assert self.early_stopping_patience > 0, \
+            f"early_stopping_patience must be positive, got {self.early_stopping_patience}"
+        assert self.early_stopping_min_delta >= 0, \
+            f"early_stopping_min_delta must be non-negative, got {self.early_stopping_min_delta}"
 
         # 選択肢の検証
         valid_func_types = ["gauss10", "gauss5", "gauss3", "tri"]

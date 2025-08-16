@@ -2,7 +2,8 @@
     "global_config": {
         "max_iter": 2000,
         "abs_tol": 1e-7,
-        "n_cpu": -2
+        "n_cpu": -2,
+        "dataset_noise_std": 0.01
     },
     "sessions": [
         ["BFGS", 100, 2, "gauss5", "conv"],

@@ -499,8 +499,10 @@ def main():
     check_seed_duplication(records, paths)
     dump_as_csv(records, mtimes)
 
+    target_nqubit_lst = [2, 3, 4, 5, 6]
+
     for opt_method in ["BFGS"]:
-        for n_qubit in [2, 3, 4]:
+        for n_qubit in target_nqubit_lst:
             for func_type in ["gauss5", "tri"]:
                 for method in ["conv", "pow_3", "nonint"]:
                     save_one_data_with_median_cost(
@@ -511,7 +513,6 @@ def main():
                         method=method,
                     )
 
-    target_nqubit_lst = [2, 3, 4]
     for func_type in ["gauss5", "tri"]:
         show_cost_distribution(
             records,
